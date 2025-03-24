@@ -1,20 +1,16 @@
+
+import os
+import zipfile
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from typing import List
 from PIL import Image
 import pytesseract
-import os
-import shutil
+import io
 import openai
-from typing import List
-import uuid
-import zipfile
-
 from dotenv import load_dotenv
-load_dotenv()
 
-from dotenv import load_dotenv
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -28,58 +24,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
-
-TEMP_DIR = "temp_uploads"
-RESULTS_DIR = "results"
-os.makedirs(TEMP_DIR, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True)
-
 @app.post("/process-stream/")
-async def process_images_stream(files: List[UploadFile] = File(...)):
-    texts = []
-    session_id = str(uuid.uuid4())
-    session_dir = os.path.join(TEMP_DIR, session_id)
-    os.makedirs(session_dir, exist_ok=True)
+async def process_stream(files: List[UploadFile] = File(...)):
+    print("🔵 Aloitetaan käsittely...")
+    collected_texts = []
 
-    for i, file in enumerate(files):
-        file_location = os.path.join(session_dir, file.filename)
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    for idx, file in enumerate(files):
+        print(f"➡️ Käsitellään tiedosto {idx+1}/{len(files)}: {file.filename}")
 
-        image = Image.open(file_location)
-        raw_text = pytesseract.image_to_string(image, lang="fin")
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents))
 
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Olet avustaja, joka stilisoi ja anonymisoi kuvankaappauksista poimitun tekstin."},
-                {"role": "user", "content": raw_text},
-            ]
+        print("🔡 Suoritetaan OCR...")
+        try:
+            raw_text = pytesseract.image_to_string(image, lang="fin")
+        except Exception as e:
+            print(f"❌ OCR-virhe: {e}")
+            raw_text = "[OCR epäonnistui]"
+
+        prompt = (
+            "Alla on teksti kuvankaappauksesta. Poista siitä nimet ja yksilöivät tiedot, "
+            "ja stilisoi teksti luettavampaan muotoon:\n\n"
+            f"{raw_text}\n\n"
+            "Palauta ainoastaan muokattu teksti ilman lisäselityksiä."
         )
 
-        styled_text = response.choices[0].message.content.strip()
-        texts.append(styled_text)
+        print("🤖 Lähetetään ChatGPT:lle...")
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            cleaned_text = response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"❌ OpenAI-virhe: {e}")
+            cleaned_text = "[Virhe OpenAI-käsittelyssä]"
 
-    result_text = "\n\n---\n\n".join(texts)
-    result_filename = f"result_{session_id}.txt"
-    result_path = os.path.join(RESULTS_DIR, result_filename)
+        collected_texts.append(f"Tiedosto: {file.filename}\n{cleaned_text}\n{'-'*40}\n")
 
-    with open(result_path, "w", encoding="utf-8") as f:
-        f.write(result_text)
+    print("📦 Luodaan ZIP-tiedosto...")
+    output_path = "/tmp/output.zip"
+    with zipfile.ZipFile(output_path, "w") as zipf:
+        zipf.writestr("anonymisoitu_teksti.txt", "\n".join(collected_texts))
 
-    # Pakkaa tulos zip-tiedostoksi
-    zip_filename = f"result_{session_id}.zip"
-    zip_path = os.path.join(RESULTS_DIR, zip_filename)
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        zipf.write(result_path, arcname=result_filename)
-
-    return {"download_url": f"/download/{zip_filename}"}
-
-@app.get("/download/{zip_filename}")
-def download_result(zip_filename: str):
-    return FileResponse(os.path.join(RESULTS_DIR, zip_filename), media_type='application/zip', filename=zip_filename)
-
-@app.get("/")
-def serve_index():
-    return FileResponse("frontend/index.html")
+    print("✅ Valmis, palautetaan tiedosto.")
+    return FileResponse(output_path, filename="anonymisoitu_teksti.zip", media_type="application/zip")
