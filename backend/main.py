@@ -1,14 +1,13 @@
-
 import os
-import zipfile
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from typing import List
-from PIL import Image
-import pytesseract
 import io
+import zipfile
+import pytesseract
 import openai
+from PIL import Image
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,52 +24,42 @@ app.add_middleware(
 )
 
 @app.post("/process-stream/")
-async def process_stream(files: List[UploadFile] = File(...)):
-    print("🔵 Aloitetaan käsittely...")
-    collected_texts = []
-
+async def process_stream(files: list[UploadFile] = File(...)):
+    print("==> Aloitetaan tiedostojen käsittely")
+    texts = []
     for idx, file in enumerate(files):
-        print(f"➡️ Käsitellään tiedosto {idx+1}/{len(files)}: {file.filename}")
-
+        print(f"--> Käsitellään tiedosto: {file.filename}")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-
-        print("🔡 Suoritetaan OCR...")
         try:
             raw_text = pytesseract.image_to_string(image, lang="fin")
+            print(f"    OCR-tunnistus valmis, tekstiä löytyi {len(raw_text)} merkkiä")
         except Exception as e:
-            print(f"❌ OCR-virhe: {e}")
-            raw_text = "[OCR epäonnistui]"
+            print(f"    OCR epäonnistui: {e}")
+            raw_text = ""
 
-        prompt = (
-            "Alla on teksti kuvankaappauksesta. Poista siitä nimet ja yksilöivät tiedot, "
-            "ja stilisoi teksti luettavampaan muotoon:\n\n"
-            f"{raw_text}\n\n"
-            "Palauta ainoastaan muokattu teksti ilman lisäselityksiä."
-        )
-
-        print("🤖 Lähetetään ChatGPT:lle...")
         try:
             response = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Puhdista ja anonymisoi seuraava teksti: pidä henkilöiden nimet muodossa Henkilö 1, Henkilö 2 jne."},
+                    {"role": "user", "content": raw_text}
+                ]
             )
             cleaned_text = response.choices[0].message.content.strip()
+            print(f"    OpenAI vastasi, pituus: {len(cleaned_text)} merkkiä")
         except Exception as e:
-            print(f"❌ OpenAI-virhe: {e}")
-            cleaned_text = "[Virhe OpenAI-käsittelyssä]"
+            print(f"    OpenAI-kutsu epäonnistui: {e}")
+            cleaned_text = raw_text
 
-        collected_texts.append(f"Tiedosto: {file.filename}\n{cleaned_text}\n{'-'*40}\n")
+        texts.append(f"{file.filename}\n\n{cleaned_text}\n\n{'='*40}\n")
 
-    print("📦 Luodaan ZIP-tiedosto...")
-    output_path = "/tmp/output.zip"
+    output_path = "processed_output.zip"
     with zipfile.ZipFile(output_path, "w") as zipf:
-        zipf.writestr("anonymisoitu_teksti.txt", "\n".join(collected_texts))
+        zipf.writestr("processed.txt", "\n".join(texts))
 
-    print("✅ Valmis, palautetaan tiedosto.")
-    return FileResponse(output_path, filename="anonymisoitu_teksti.zip", media_type="application/zip")
+    print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
+    return FileResponse(output_path, media_type="application/x-zip-compressed", filename="processed_output.zip")
 
-from fastapi.staticfiles import StaticFiles
+# Staattiset tiedostot frontendille
 app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
-
