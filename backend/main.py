@@ -36,7 +36,7 @@ def encode_image_to_base64(image: Image.Image):
 def call_gpt4_vision(base64_image: str):
     try:
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
