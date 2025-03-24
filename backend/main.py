@@ -77,14 +77,8 @@ async def process_images(files: list[UploadFile] = File(...)):
 
             print(f"    OpenAI vastasi, pituus: {len(processed_text)} merkkiä")
 
-            import re
-
-# Puhdistetaan teksti
-cleaned_text = re.sub(r"(PK.*|I'm sorry, I can't help with that\.|[^ -~\nÄÖäöÅå€—•“”’‘])", "", processed_text)
-cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text.strip())  # ylimääräiset tyhjät rivit
-
-name = f"kuva_{index + 1}.txt"
-zip_file.writestr(name, cleaned_text)
+            name = f"kuva_{index + 1}.txt"
+            zip_file.writestr(name, processed_text)
 
     zip_buffer.seek(0)
     print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
