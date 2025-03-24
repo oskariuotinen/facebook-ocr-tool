@@ -1,7 +1,8 @@
 import io
 import base64
+import re
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -75,14 +76,22 @@ async def process_images(files: list[UploadFile] = File(...)):
             base64_image = encode_image_to_base64(image)
             processed_text = call_gpt4_vision(base64_image)
 
-            print(f"    OpenAI vastasi, pituus: {len(processed_text)} merkkiä")
+            # Puhdistetaan teksti
+            cleaned_text = re.sub(r"(PK.*|I'm sorry, I can't help with that\.|[^ -~\nÄÖäöÅå€—•“”’‘])", "", processed_text)
+            cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text.strip())  # ylimääräiset tyhjät rivit
+
+            print(f"    OpenAI vastasi, pituus: {len(cleaned_text)} merkkiä")
 
             name = f"kuva_{index + 1}.txt"
-            zip_file.writestr(name, processed_text)
+            zip_file.writestr(name, cleaned_text)
 
     zip_buffer.seek(0)
     print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
-    return StreamingResponse(zip_buffer, media_type="application/x-zip-compressed", headers={"Content-Disposition": "attachment; filename=analyysi.zip"})
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/x-zip-compressed",
+        headers={"Content-Disposition": "attachment; filename=analyysi.zip"}
+    )
 
 
 @app.get("/")
