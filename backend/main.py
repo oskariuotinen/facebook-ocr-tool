@@ -1,17 +1,18 @@
-import os
 import io
-import zipfile
-import pytesseract
-import openai
-from PIL import Image
-from fastapi import FastAPI, UploadFile, File, Form
+import base64
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from openai import OpenAI
+from PIL import Image
+import zipfile
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI()
 
 app = FastAPI()
 
@@ -23,43 +24,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/process-stream/")
-async def process_stream(files: list[UploadFile] = File(...)):
-    print("==> Aloitetaan tiedostojen käsittely")
-    texts = []
-    for idx, file in enumerate(files):
-        print(f"--> Käsitellään tiedosto: {file.filename}")
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents))
-        try:
-            raw_text = pytesseract.image_to_string(image, lang="fin")
-            print(f"    OCR-tunnistus valmis, tekstiä löytyi {len(raw_text)} merkkiä")
-        except Exception as e:
-            print(f"    OCR epäonnistui: {e}")
-            raw_text = ""
-
-        try:
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Puhdista ja anonymisoi seuraava teksti: pidä henkilöiden nimet muodossa Henkilö 1, Henkilö 2 jne."},
-                    {"role": "user", "content": raw_text}
-                ]
-            )
-            cleaned_text = response.choices[0].message.content.strip()
-            print(f"    OpenAI vastasi, pituus: {len(cleaned_text)} merkkiä")
-        except Exception as e:
-            print(f"    OpenAI-kutsu epäonnistui: {e}")
-            cleaned_text = raw_text
-
-        texts.append(f"{file.filename}\n\n{cleaned_text}\n\n{'='*40}\n")
-
-    output_path = "processed_output.zip"
-    with zipfile.ZipFile(output_path, "w") as zipf:
-        zipf.writestr("processed.txt", "\n".join(texts))
-
-    print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
-    return FileResponse(output_path, media_type="application/x-zip-compressed", filename="processed_output.zip")
-
-# Staattiset tiedostot frontendille
 app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
+
+
+def encode_image_to_base64(image: Image.Image):
+    buffered = io.BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+
+def call_gpt4_vision(base64_image: str):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Lue kuvasta teksti ja anonymisoi se. Korvaa nimet muotoon Henkilö 1, Henkilö 2 jne. Palauta pelkkä puhdistettu teksti."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}",
+                                "detail": "auto"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Vision-API epäonnistui: {e}"
+
+
+@app.post("/process-stream/")
+async def process_images(files: list[UploadFile] = File(...)):
+    print("==> Aloitetaan tiedostojen käsittely")
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+        for index, file in enumerate(files):
+            print(f"--> Käsitellään tiedosto: {file.filename}")
+            image = Image.open(io.BytesIO(await file.read())).convert("RGB")
+
+            base64_image = encode_image_to_base64(image)
+            processed_text = call_gpt4_vision(base64_image)
+
+            print(f"    OpenAI vastasi, pituus: {len(processed_text)} merkkiä")
+
+            name = f"kuva_{index + 1}.txt"
+            zip_file.writestr(name, processed_text)
+
+    zip_buffer.seek(0)
+    print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
+    return StreamingResponse(zip_buffer, media_type="application/x-zip-compressed", headers={"Content-Disposition": "attachment; filename=analyysi.zip"})
+
+
+@app.get("/")
+async def serve_frontend():
+    try:
+        with open("frontend/index.html", encoding="utf-8") as f:
+            html = f.read()
+        return HTMLResponse(content=html, status_code=200)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
