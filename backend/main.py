@@ -70,3 +70,7 @@ async def process_stream(files: List[UploadFile] = File(...)):
 
     print("✅ Valmis, palautetaan tiedosto.")
     return FileResponse(output_path, filename="anonymisoitu_teksti.zip", media_type="application/zip")
+
+from fastapi.staticfiles import StaticFiles
+app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
+
