@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <title>Facebook-tekstin anonymisoija</title>
+    <style>
+        body { font-family: Arial; margin: 30px; }
+        #output { white-space: pre-wrap; margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 200px; }
+        button { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>Lataa Facebook-kuvia</h2>
+    <input type="file" id="fileInput" accept="image/*" multiple />
+    <br />
+    <button onclick="sendImages()">Prosessoi</button>
+    <button onclick="downloadText()" id="downloadBtn" style="display:none;">Lataa tekstitiedosto</button>
+
+    <div id="output">Odottaa käsittelyä...</div>
+
+    <script>
+        let processedText = "";
+
+        async function sendImages() {
+            const fileInput = document.getElementById("fileInput");
+            const files = fileInput.files;
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append("files", files[i]);
+            }
+
+            document.getElementById("output").innerText = "Käsittely käynnissä...";
+
+            const res = await fetch("http://localhost:8000/process-stream/", {
+                method: "POST",
+                body: formData
+            });
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            processedText = "";
+            document.getElementById("downloadBtn").style.display = "none";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value);
+                processedText += chunk;
+                document.getElementById("output").innerText = processedText;
+            }
+
+            document.getElementById("downloadBtn").style.display = "inline-block";
+        }
+
+        function downloadText() {
+            const blob = new Blob([processedText], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "anonymisoitu_teksti.txt";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
