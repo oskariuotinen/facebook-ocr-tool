@@ -40,7 +40,7 @@ def call_gpt4_vision(base64_image: str):
             messages=[
                 {
                     "role": "system",
-                    "content": "Lue kuvasta teksti ja anonymisoi se. Korvaa nimet muotoon Henkilö 1, Henkilö 2 jne. Palauta pelkkä puhdistettu teksti."
+                    "content": "Lue kuvasta teksti ja anonymisoi se. Korvaa kaikki suomenkieliset nimet muotoon Henkilö 1, Henkilö 2 jne. Poista lisäksi kaikki Facebook-julkaisuun liittyvät elementit (kommentit, jaot ym.). Palauta pelkkä puhdistettu teksti."
                 },
                 {
                     "role": "user",
@@ -77,8 +77,14 @@ async def process_images(files: list[UploadFile] = File(...)):
 
             print(f"    OpenAI vastasi, pituus: {len(processed_text)} merkkiä")
 
-            name = f"kuva_{index + 1}.txt"
-            zip_file.writestr(name, processed_text)
+            import re
+
+# Puhdistetaan teksti
+cleaned_text = re.sub(r"(PK.*|I'm sorry, I can't help with that\.|[^ -~\nÄÖäöÅå€—•“”’‘])", "", processed_text)
+cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text.strip())  # ylimääräiset tyhjät rivit
+
+name = f"kuva_{index + 1}.txt"
+zip_file.writestr(name, cleaned_text)
 
     zip_buffer.seek(0)
     print("==> Kaikki tiedostot käsitelty ja tallennettu ZIP-tiedostoon")
