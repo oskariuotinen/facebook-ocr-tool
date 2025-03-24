@@ -41,7 +41,7 @@ def call_gpt4_vision(base64_image: str):
             messages=[
                 {
                     "role": "system",
-                    "content": "Lue kuvasta teksti ja anonymisoi se. Korvaa kaikki suomenkieliset nimet muotoon Henkilö 1, Henkilö 2 jne. Poista lisäksi kaikki Facebook-julkaisuun liittyvät elementit (kommentit, jaot ym.). Palauta pelkkä puhdistettu teksti."
+                    "content": "Lue kuvasta teksti ja anonymisoi se. Korvaa nimet muotoon Henkilö 1, Henkilö 2 jne. Palauta pelkkä puhdistettu teksti."
                 },
                 {
                     "role": "user",
